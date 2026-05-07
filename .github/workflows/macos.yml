@@ -1,0 +1,34 @@
+name: macOS Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+
+  build-macos-arm64:
+    runs-on: macos-latest
+    name: Build for macOS arm64
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install V
+      run: |
+        git clone --depth=1 https://github.com/vlang/v
+        cd v
+        make
+        sudo ./v symlink
+        v version
+
+    - name: Build shared library for arm64
+      run: |
+        mkdir -p ./lib/macos
+        v -cc gcc -shared ./core/php_wasm.v -o ./lib/macos/wasm.dylib
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: wasm-macos-arm64
+        path: ./lib/macos/wasm.dylib
+        if-no-files-found: error

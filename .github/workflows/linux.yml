@@ -1,0 +1,62 @@
+name: Linux Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+
+  build-linux-x86_64:
+    runs-on: ubuntu-latest
+    name: Build for Linux x86_64
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install V
+      run: |
+        git clone --depth=1 https://github.com/vlang/v
+        cd v
+        make
+        sudo ./v symlink
+        v version
+
+    - name: Build shared library
+      run: |
+        mkdir -p ./lib/linux
+        v -cc gcc -shared ./core/php_wasm.v -o ./lib/linux/wasm.so
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: wasm-linux-x86_64
+        path: ./lib/linux/wasm.so
+        if-no-files-found: error
+
+  build-linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    name: Build for Linux arm64
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install V
+      run: |
+        git clone --depth=1 https://github.com/vlang/v
+        cd v
+        make
+        sudo ./v symlink
+        v version
+
+    - name: Build shared library
+      run: |
+        mkdir -p ./lib/linux
+        v -cc gcc -shared ./core/php_wasm.v -o ./lib/linux/wasm.so
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: wasm-linux-arm64
+        path: ./lib/linux/wasm.so
+        if-no-files-found: error

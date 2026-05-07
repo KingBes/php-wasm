@@ -1,0 +1,36 @@
+name: Windows Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+
+  build-windows-x86_64:
+    runs-on: windows-latest
+    name: Build for Windows x86_64
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install V
+      run: |
+        git clone --depth=1 https://github.com/vlang/v
+        cd v
+        .\make.bat
+        set PATH=%CD%;%PATH%
+        v version
+      shell: cmd
+
+    - name: Build shared library
+      run: |
+        if not exist ".\lib\windows" mkdir ".\lib\windows"
+        v -cc gcc -shared .\core\php_wasm.v -o .\lib\windows\wasm.dll
+      shell: cmd
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: wasm-windows-x86_64
+        path: .\lib\windows\wasm.dll
+        if-no-files-found: error
