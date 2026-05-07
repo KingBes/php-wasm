@@ -49,8 +49,9 @@ jobs:
       uses: uraimo/run-on-arch-action@v2
       with:
         arch: aarch64
-        distribution: ubuntu-latest
+        distro: ubuntu22.04
         run: |
+          apt-get update && apt-get install -y git gcc make
           git clone --depth=1 https://github.com/vlang/v
           cd v
           make
@@ -93,55 +94,12 @@ jobs:
         path: ./lib/macos/wasm.dylib
         if-no-files-found: error
 
-  build-windows-x86_64:
-    runs-on: windows-latest
-    name: Build for Windows x86_64
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Install MSYS2
-      uses: msys2/setup-msys2@v2
-      with:
-        msystem: mingw64
-        update: true
-        install: mingw-w64-x86_64-gcc
-
-    - name: Install V
-      run: |
-        curl -L -o v.zip https://github.com/vlang/v/releases/latest/download/v_windows.zip
-        tar -xf v.zip
-        rm v.zip
-      shell: bash
-
-    - name: Add V to PATH
-      run: echo "${{ github.workspace }}/v" >> $env:GITHUB_PATH
-      shell: bash
-
-    - name: Verify V
-      run: v version
-
-    - name: Build shared library
-      run: |
-        if not exist ".\\lib\\windows" mkdir ".\\lib\\windows"
-        C:\\msys64\\mingw64\\bin\\gcc -shared .\\core\\php_wasm.v -o .\\lib\\windows\\wasm.dll
-      shell: bash
-
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: wasm-windows-x86_64
-        path: .\lib\windows\wasm.dll
-        if-no-files-found: error
-
   release:
     name: Create Release
     needs:
       - build-linux-x86_64
       - build-linux-arm64
       - build-macos-arm64
-      - build-windows-x86_64
     runs-on: ubuntu-latest
 
     steps:
@@ -159,7 +117,6 @@ jobs:
         cp ./artifacts/wasm-linux-x86_64/wasm.so ./release/wasm-linux-x86_64.so
         cp ./artifacts/wasm-linux-arm64/wasm.so ./release/wasm-linux-arm64.so
         cp ./artifacts/wasm-macos-arm64/wasm.dylib ./release/wasm-macos-arm64.dylib
-        cp ./artifacts/wasm-windows-x86_64/wasm.dll ./release/wasm-windows-x86_64.dll
 
     - name: Create Release
       uses: softprops/action-gh-release@v2
@@ -168,5 +125,4 @@ jobs:
           ./release/wasm-linux-x86_64.so
           ./release/wasm-linux-arm64.so
           ./release/wasm-macos-arm64.dylib
-          ./release/wasm-windows-x86_64.dll
         generate_release_notes: true
