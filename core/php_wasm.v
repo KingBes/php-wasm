@@ -29,7 +29,11 @@ fn new_debug_fn(mod voidptr, name &char, typ voidptr, arg_names []string) voidpt
 	mut m := unsafe { &wasm.Module(mod) }
 	v_name := unsafe { cstring_to_vstring(name) }
 	v_typ := unsafe { &wasm.FuncType(typ) }
-	f := m.new_debug_function(v_name, v_typ, ?arg_names)
+	mut v_arg_names := []?string{}
+	for arg_name in arg_names {
+		v_arg_names << arg_name
+	}
+	f := m.new_debug_function(v_name, v_typ, v_arg_names)
 	return voidptr(&f)
 }
 
