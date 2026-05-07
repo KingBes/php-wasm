@@ -29,7 +29,7 @@ fn new_debug_fn(mod voidptr, name &char, typ voidptr, arg_names []string) voidpt
 	mut m := unsafe { &wasm.Module(mod) }
 	v_name := unsafe { cstring_to_vstring(name) }
 	v_typ := unsafe { &wasm.FuncType(typ) }
-	f := m.new_debug_function(v_name, v_typ, arg_names)
+	f := m.new_debug_function(v_name, v_typ, if arg_names.len > 0 { arg_names } else { []string{} })
 	return voidptr(&f)
 }
 
@@ -888,7 +888,7 @@ fn help_num_type(val &char) wasm.NumType {
 }
 
 // RefType字符串转 RefType
-@[export : 'help_ref_type']
+@[export: 'help_ref_type']
 fn help_ref_type(val &char) wasm.RefType {
 	v_val := unsafe { cstring_to_vstring(val) }
 	return match v_val {
@@ -898,14 +898,14 @@ fn help_ref_type(val &char) wasm.RefType {
 }
 
 // 字符串转u8
-@[export:'help_str_to_u8']
+@[export: 'help_str_to_u8']
 fn help_str_to_u8(str &char) u8 {
 	v_str := unsafe { cstring_to_vstring(str) }
 	return v_str.u8()
 }
 
 // 字符串转u8数组
-@[export:'help_str_to_u8s']
+@[export: 'help_str_to_u8s']
 fn help_str_to_u8s(str &char) []u8 {
 	v_str := unsafe { cstring_to_vstring(str) }
 	return v_str.u8_array()
