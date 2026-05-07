@@ -66,34 +66,6 @@ jobs:
         path: ./lib/macos/wasm.dylib
         if-no-files-found: error
 
-  build-macos-x86_64:
-    runs-on: macos-13
-    name: Build for macOS x86_64
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Install V
-      run: |
-        git clone --depth=1 https://github.com/vlang/v
-        cd v
-        make
-        sudo ./v symlink
-        v version
-
-    - name: Build shared library
-      run: |
-        mkdir -p ./lib/macos
-        v -cc gcc -shared ./core/php_wasm.v -o ./lib/macos/wasm.dylib
-
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: wasm-macos-x86_64
-        path: ./lib/macos/wasm.dylib
-        if-no-files-found: error
-
   build-windows-x86_64:
     runs-on: windows-latest
     name: Build for Windows x86_64
@@ -141,7 +113,6 @@ jobs:
     needs:
       - build-linux-x86_64
       - build-macos-arm64
-      - build-macos-x86_64
       - build-windows-x86_64
     runs-on: ubuntu-latest
 
@@ -167,6 +138,5 @@ jobs:
         files: |
           ./release/wasm-linux-x86_64.so
           ./release/wasm-macos-arm64.dylib
-          ./release/wasm-macos-x86_64.dylib
           ./release/wasm-windows-x86_64.dll
         generate_release_notes: true
