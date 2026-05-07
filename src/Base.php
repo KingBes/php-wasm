@@ -23,6 +23,14 @@ abstract class Base
 
     public static function getLibFile(): string
     {
+        $uname = php_uname('m');
+        if (in_array($uname, ['aarch64', 'arm64'])) {
+            $arch = 'arm64';
+        } elseif ($uname === 'x86_64') {
+            $arch = 'x86_64';
+        } else {
+            throw new \RuntimeException("Unsupported architecture: $uname");
+        }
         switch (PHP_OS_FAMILY) {
             case "Windows":
                 $os = "windows";
@@ -39,10 +47,16 @@ abstract class Base
             default:
                 throw new \RuntimeException("Only supports Windows, Linux and Mac OS systems.");
         }
-        return dirname(__DIR__)
+        $file = dirname(__DIR__)
             . DIRECTORY_SEPARATOR . "lib"
             . DIRECTORY_SEPARATOR . $os
+            . DIRECTORY_SEPARATOR . $arch
             . DIRECTORY_SEPARATOR . "wasm." . $suffix;
+        if (!file_exists($file)) {
+            throw new \RuntimeException("Library file not found: $file, Please compile it by yourself.");
+
+        }
+        return $file;
     }
 
     /**

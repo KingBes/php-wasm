@@ -51,13 +51,12 @@ jobs:
         arch: aarch64
         distro: ubuntu22.04
         run: |
-          apt-get update && apt-get install -y git gcc make
-          git clone --depth=1 https://github.com/vlang/v
-          cd v
-          make
-          sudo ./v symlink
+          apt-get update && apt-get install -y curl unzip gcc
+          curl -L -o v.zip https://github.com/vlang/v/releases/latest/download/v_linux_arm64.zip
+          unzip -o v.zip
+          rm v.zip
           mkdir -p ./lib/linux
-          v -cc gcc -shared ./core/php_wasm.v -o ./lib/linux/wasm.so
+          ./v/v -cc gcc -shared ./core/php_wasm.v -o ./lib/linux/wasm.so
 
     - name: Download artifact
       uses: actions/upload-artifact@v4

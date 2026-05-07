@@ -43,16 +43,14 @@ jobs:
 
     - name: Install V
       run: |
-        git clone --depth=1 https://github.com/vlang/v
-        cd v
-        make
-        sudo ./v symlink
-        v version
+        curl -L -o v.zip https://github.com/vlang/v/releases/latest/download/v_linux_arm64.zip
+        unzip -o v.zip
+        rm v.zip
 
     - name: Build shared library
       run: |
         mkdir -p ./lib/linux
-        v -cc gcc -shared ./core/php_wasm.v -o ./lib/linux/wasm.so
+        ./v/v -cc gcc -shared ./core/php_wasm.v -o ./lib/linux/wasm.so
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
