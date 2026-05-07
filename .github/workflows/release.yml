@@ -38,6 +38,33 @@ jobs:
         path: ./lib/linux/wasm.so
         if-no-files-found: error
 
+  build-linux-arm64:
+    runs-on: ubuntu-latest
+    name: Build for Linux arm64
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Build on ARM64
+      uses: uraimo/run-on-arch-action@v2
+      with:
+        arch: aarch64
+        distribution: ubuntu-latest
+        run: |
+          git clone --depth=1 https://github.com/vlang/v
+          cd v
+          make
+          sudo ./v symlink
+          mkdir -p ./lib/linux
+          v -cc gcc -shared ./core/php_wasm.v -o ./lib/linux/wasm.so
+
+    - name: Download artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: wasm-linux-arm64
+        path: ./lib/linux/wasm.so
+        if-no-files-found: error
+
   build-macos-arm64:
     runs-on: macos-latest
     name: Build for macOS arm64
@@ -112,6 +139,7 @@ jobs:
     name: Create Release
     needs:
       - build-linux-x86_64
+      - build-linux-arm64
       - build-macos-arm64
       - build-windows-x86_64
     runs-on: ubuntu-latest
@@ -129,6 +157,7 @@ jobs:
       run: |
         mkdir -p ./release
         cp ./artifacts/wasm-linux-x86_64/wasm.so ./release/wasm-linux-x86_64.so
+        cp ./artifacts/wasm-linux-arm64/wasm.so ./release/wasm-linux-arm64.so
         cp ./artifacts/wasm-macos-arm64/wasm.dylib ./release/wasm-macos-arm64.dylib
         cp ./artifacts/wasm-windows-x86_64/wasm.dll ./release/wasm-windows-x86_64.dll
 
@@ -137,6 +166,7 @@ jobs:
       with:
         files: |
           ./release/wasm-linux-x86_64.so
+          ./release/wasm-linux-arm64.so
           ./release/wasm-macos-arm64.dylib
           ./release/wasm-windows-x86_64.dll
         generate_release_notes: true
