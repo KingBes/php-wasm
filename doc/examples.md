@@ -57,6 +57,10 @@ $mod->compile("./add.wasm");
 计算平方：\( x^2 \)
 
 ```php
+use Kingbes\Wasm\Module;
+use Kingbes\Wasm\ValType;
+use Kingbes\Wasm\NumType;
+
 $mod = new Module();
 
 $fn = $mod->newFn([
@@ -84,6 +88,9 @@ $mod->compile("./square.wasm");
 实现一个函数：如果 `x > 0` 返回 1，否则返回 0。
 
 ```php
+use Kingbes\Wasm\Module;
+use Kingbes\Wasm\ValType;
+
 $mod = new Module();
 
 $fn = $mod->newFn([
@@ -92,11 +99,14 @@ $fn = $mod->newFn([
     "results" => [ValType::I32],
 ]);
 
+// 将条件压入栈：local.get 0 > 0 ?
+$fn->getLocal(0)->const(0)->gt(NumType::I32, true);
+
 $label = $fn->if_([], [ValType::I32]); // if 块，返回值类型 i32
-    $fn->const(1);                      // then: 压入 1
-$fn->else_($label);                    // else
-    $fn->const(0);                      // else: 压入 0
-$fn->end($label);                      // 结束 if
+$fn->const(1);                          // then: 返回 1
+$fn->else_($label);                     // else
+$fn->const(0);                          // else: 返回 0
+$fn->end($label);                       // 结束 if
 
 $mod->commit($fn);
 $mod->compile("./is_positive.wasm");
@@ -109,6 +119,10 @@ $mod->compile("./is_positive.wasm");
 实现 `sum(n)` = 1 + 2 + ... + n
 
 ```php
+use Kingbes\Wasm\Module;
+use Kingbes\Wasm\ValType;
+use Kingbes\Wasm\NumType;
+
 $mod = new Module();
 
 $fn = $mod->newFn([
@@ -158,6 +172,9 @@ $mod->compile("./sum.wasm");
 使用可变全局变量实现计数器。
 
 ```php
+use Kingbes\Wasm\Module;
+use Kingbes\Wasm\ValType;
+use Kingbes\Wasm\NumType;
 use Kingbes\Wasm\ConstExpression;
 
 $mod = new Module();
@@ -196,6 +213,10 @@ $mod->compile("./counter.wasm");
 在内存中存储和读取数据。
 
 ```php
+use Kingbes\Wasm\Module;
+use Kingbes\Wasm\ValType;
+use Kingbes\Wasm\NumType;
+
 $mod = new Module();
 
 // 配置内存（1 页 = 64KB）
@@ -232,6 +253,9 @@ $mod->compile("./memory.wasm");
 导入外部函数并在 Wasm 中调用。
 
 ```php
+use Kingbes\Wasm\Module;
+use Kingbes\Wasm\ValType;
+
 $mod = new Module();
 
 // 导入外部函数 print_num(i32) -> ()
@@ -260,6 +284,10 @@ $mod->compile("./import.wasm");
 生成带调试信息的 Wasm 模块。
 
 ```php
+use Kingbes\Wasm\Module;
+use Kingbes\Wasm\ValType;
+use Kingbes\Wasm\NumType;
+
 $mod = new Module();
 $mod->enableDebug("my_module");
 
@@ -284,6 +312,10 @@ $mod->compile("./add_debug.wasm");
 在模块中嵌入静态数据。
 
 ```php
+use Kingbes\Wasm\Module;
+use Kingbes\Wasm\ValType;
+use Kingbes\Wasm\NumType;
+
 $mod = new Module();
 $mod->assignMemory("mem", true, 1, 1);
 
@@ -310,6 +342,10 @@ $mod->compile("./data_segment.wasm");
 位操作示例：将值左移 N 位。
 
 ```php
+use Kingbes\Wasm\Module;
+use Kingbes\Wasm\ValType;
+use Kingbes\Wasm\NumType;
+
 $mod = new Module();
 
 $fn = $mod->newFn([

@@ -43,7 +43,12 @@ $cdata = $val->data(); // 返回 FFI 编码的值
 ```php
 use Kingbes\Wasm\ValType;
 
-$fn = $mod->newFn("add", [ValType::I32, ValType::I32], [ValType::I32]);
+$config = [
+    "name"    => "add",
+    "params"  => [ValType::I32, ValType::I32],
+    "results" => [ValType::I32],
+];
+$fn = $mod->newFn($config);
 $localIdx = $fn->newLocal(ValType::F64);
 ```
 
