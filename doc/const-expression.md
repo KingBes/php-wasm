@@ -135,3 +135,11 @@ $expr = (new ConstExpression(2))
 ```
 
 > **说明**：`add` / `sub` / `mul` 传入 `F32` / `F64` 会抛出 `InvalidArgumentException`，因为 Wasm 常量表达式不允许浮点运算；`f32Const` / `f64Const` 仅用于追加浮点常量，不能参与算术。
+>
+> **运行时要求（重要）**：`add` / `sub` / `mul` 生成的是 `extended-const` 提案定义的常量算术指令。标准 Wasm（MVP）的常量表达式**只允许** `i32.const` / `i64.const` / `f32.const` / `f64.const` / `ref.null` / `ref.func` / `global.get`（引用导入的不可变全局），因此使用了这些运算的模块在**未启用 `extended-const` 的运行时**（如 Node.js 20 及更旧的 V8）会在编译期被拒绝：
+>
+> ```
+> CompileError: WebAssembly.instantiate(): opcode i32.add is not allowed in constant expressions
+> ```
+>
+> Node.js 22+ 已默认启用该提案。若需面向旧运行时，请避免在常量表达式中使用 `add` / `sub` / `mul`，改为在函数体内计算。
