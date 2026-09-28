@@ -2,8 +2,8 @@
 
 namespace Kingbes\Wasm;
 
-use \FFI\CData;
 use Kingbes\Wasm\Base;
+use Kingbes\Wasm\Wasm\FuncTypeState;
 
 /**
  * 函数类型对象
@@ -14,11 +14,11 @@ use Kingbes\Wasm\Base;
 class FunType extends Base
 {
     /**
-     * 数据指针
+     * 函数类型状态
      *
-     * @var CData
+     * @var FuncTypeState
      */
-    public CData $data;
+    public FuncTypeState $data;
 
     /**
      * 构造函数
@@ -35,14 +35,14 @@ class FunType extends Base
      */
     public function __construct(array $param, array $results, string $type_name = "")
     {
-        $c_param = $this->creatValTypeArr();
+        $params = [];
         foreach ($param as $p) {
-            $c_param = $this->addValTypeArr($c_param, $p);
+            $params[] = $p->data();
         }
-        $c_results = $this->creatValTypeArr();
+        $rets = [];
         foreach ($results as $res) {
-            $c_results = $this->addValTypeArr($c_results, $res);
+            $rets[] = $res->data();
         }
-        $this->data = self::ffi()->new_fn_type($c_param, $c_results, $type_name);
+        $this->data = new FuncTypeState($params, $rets, $type_name);
     }
 }

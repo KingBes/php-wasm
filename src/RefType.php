@@ -2,8 +2,6 @@
 
 namespace Kingbes\Wasm;
 
-use Kingbes\Wasm\Base;
-
 /**
  * 引用类型枚举
  * @example ```php
@@ -16,7 +14,7 @@ enum RefType
     case ExternRef;
 
     /**
-     * 获取数据
+     * 获取该类型在 Wasm 二进制中的规范字节
      * @example ```php
      * $ref_type = RefType::FuncRef;
      * $ref_type->data();
@@ -25,10 +23,9 @@ enum RefType
      */
     public function data(): int
     {
-        $cdate = match ($this) {
-            self::FuncRef => "funcref",
-            self::ExternRef => "externref",
+        return match ($this) {
+            self::FuncRef => 0x70,
+            self::ExternRef => 0x6F,
         };
-        return Base::ffi()->help_ref_type($cdate);
     }
 }

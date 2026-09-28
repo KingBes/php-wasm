@@ -10,6 +10,7 @@
 - [函数管理](#函数管理)
 - [全局变量](#全局变量)
 - [内存管理](#内存管理)
+- [表管理](#表管理)
 - [数据段](#数据段)
 - [调试](#调试)
 - [编译](#编译)
@@ -64,6 +65,24 @@ $mod->impFn("env", "log", [
     "params"  => [ValType::I32],
     "results" => [],
 ]);
+```
+
+### newFnType — 创建函数类型
+
+```php
+public function newFnType(array $params, array $results, ?string $type_name = null): int
+```
+
+创建函数类型并返回其类型索引。相同签名的类型会被复用（驻留），返回的索引可用于 `Func::callIndirect()`。
+
+| 参数 | 说明 |
+|---|---|
+| `$params` | 参数类型数组 |
+| `$results` | 返回值类型数组 |
+| `$type_name` | 类型名称（仅调试信息使用，可省略） |
+
+```php
+$typeIdx = $mod->newFnType([ValType::I32, ValType::I32], [ValType::I32]);
 ```
 
 ### commit — 提交函数
@@ -140,16 +159,17 @@ public function newGlobaImp(
 $idx = $mod->newGlobaImp("env", "stack_ptr", ValType::I32, true);
 ```
 
-### assignGlobalInit — 设置全局变量初始值
+### assignGlobalInit — 重设全局变量初始值
 
 ```php
 public function assignGlobalInit(int $index, ConstExpression $init): void
 ```
 
-为之前导入的全局变量设置初始化表达式（通常导入的变量也需要一个 Wasm 模块内的初始值）。
+为已通过 `newGlobal()` 创建的本地全局变量重新设置初始化表达式（`$index` 即 `newGlobal()` 返回的索引）。
 
 ```php
-$mod->assignGlobalInit(0, new ConstExpression(256));
+$idx = $mod->newGlobal("max_size", true, ValType::I32, false, new ConstExpression(0));
+$mod->assignGlobalInit($idx, new ConstExpression(256)); // 初始值改为 256
 ```
 
 ## 内存管理
@@ -170,10 +190,58 @@ public function assignMemory(
 | `$name` | 内存名称 |
 | `$exp` | 是否导出 |
 | `$min` | 最小页数（每页 64KB） |
-| `$max` | 最大页数 |
+| `$max` | 最大页数，`0` 表示无上限 |
 
 ```php
 $mod->assignMemory("mem", true, 1, 10);
+```
+
+## 表管理
+
+### assignTable — 声明函数表
+
+```php
+public function assignTable(string $name, bool $exp, RefType $reftype, int $min, int $max): int
+```
+
+声明一个表并返回其索引。
+
+| 参数 | 说明 |
+|---|---|
+| `$name` | 表名称 |
+| `$exp` | 是否导出 |
+| `$reftype` | 元素类型（`RefType::FuncRef` / `RefType::ExternRef`） |
+| `$min` | 最小元素数量 |
+| `$max` | 最大元素数量，`0` 表示无上限 |
+
+```php
+use Kingbes\Wasm\RefType;
+
+$tableIdx = $mod->assignTable("tbl", true, RefType::FuncRef, 2, 0);
+```
+
+### newActiveElement — 创建主动元素段
+
+```php
+public function newActiveElement(int $tableidx, int $offset, array $funcs): int
+```
+
+在表的指定位置填入函数引用，模块加载时自动写入。
+
+```php
+$mod->newActiveElement(0, 0, ["add", "mul"]);
+```
+
+### newDeclarativeElement — 创建声明式元素段
+
+```php
+public function newDeclarativeElement(array $funcs): int
+```
+
+声明函数引用但不占用表空间（用于满足 `ref.func` 的声明要求）。
+
+```php
+$mod->newDeclarativeElement(["add"]);
 ```
 
 ## 数据段
@@ -212,7 +280,7 @@ $mod->newPassiveDataSegment("lazy_data", "some bytes");
 public function enableDebug(string $name): void
 ```
 
-为模块启用调试信息输出。需在创建函数之前调用，并与 `newFn()` / `impFn()` 的 `$debug` 参数配合使用。
+为模块启用调试信息输出（编译时生成 `name` 自定义段）。需在 `compile()` 之前调用，并与 `newFn()` / `impFn()` 的 `$debug` 参数配合使用。
 
 ```php
 $mod->enableDebug("my_module");
@@ -248,4 +316,15 @@ if ($result) {
 }
 ```
 
-> **注意**：每个 Module 实例只能调用一次 `compile()`，调用后模块资源被释放。
+### toBytes — 编译为二进制字节
+
+```php
+public function toBytes(): string
+```
+
+返回编译后的 Wasm 二进制字节，便于直接写入自定义目标或做进一步处理。
+
+```php
+$bytes = $mod->toBytes();
+file_put_contents("./output.wasm", $bytes);
+```

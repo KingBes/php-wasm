@@ -90,6 +90,7 @@ $mod->compile("./square.wasm");
 ```php
 use Kingbes\Wasm\Module;
 use Kingbes\Wasm\ValType;
+use Kingbes\Wasm\NumType;
 
 $mod = new Module();
 
@@ -138,14 +139,15 @@ $acc  = $fn->newLocal(ValType::I32); // 累加器
 $fn->getLocal(0)->setLocal($i);
 $fn->const(0)->setLocal($acc);
 
-// loop 开始
+// 外层 block 提供跳出目标，内层 loop 提供回跳目标
+$blk  = $fn->block([], []);
 $loopLabel = $fn->loop([], []);
 
-// 条件: i > 0
-$fn->getLocal($i)->const(0)->gt(NumType::I32, true);
+// 条件: i < 1
+$fn->getLocal($i)->const(1)->lt(NumType::I32, true);
 
-// 如果 i <= 0，跳出循环
-$fn->brIf(1); // 跳出 loop（向外一层是 block）
+// 如果 i < 1，跳出循环
+$fn->brIf($blk);
 
 // acc += i
 $fn->getLocal($acc)->getLocal($i)->add(NumType::I32)->setLocal($acc);
@@ -154,9 +156,10 @@ $fn->getLocal($acc)->getLocal($i)->add(NumType::I32)->setLocal($acc);
 $fn->getLocal($i)->const(1)->sub(NumType::I32)->setLocal($i);
 
 // 继续循环
-$fn->br(0); // 跳回 loop 起始
+$fn->br($loopLabel); // 跳回 loop 起始
 
 $fn->end($loopLabel);
+$fn->end($blk);
 
 // 返回 acc
 $fn->getLocal($acc);
@@ -359,4 +362,59 @@ $fn->getLocal(0)    // 值
 
 $mod->commit($fn);
 $mod->compile("./bitwise.wasm");
+```
+
+---
+
+## 示例 11：表与间接调用
+
+声明函数表，通过 `call_indirect` 间接调用表中的函数。
+
+```php
+use Kingbes\Wasm\Module;
+use Kingbes\Wasm\ValType;
+use Kingbes\Wasm\NumType;
+use Kingbes\Wasm\RefType;
+
+$mod = new Module();
+
+// add(a, b) 与 mul(a, b)
+$add = $mod->newFn([
+    "name"    => "add",
+    "params"  => [ValType::I32, ValType::I32],
+    "results" => [ValType::I32],
+]);
+$add->getLocal(0)->getLocal(1)->add(NumType::I32);
+$mod->commit($add, false); // 内部函数，不直接导出
+
+$mul = $mod->newFn([
+    "name"    => "mul",
+    "params"  => [ValType::I32, ValType::I32],
+    "results" => [ValType::I32],
+]);
+$mul->getLocal(0)->getLocal(1)->mul(NumType::I32);
+$mod->commit($mul, false);
+
+// 声明函数表并把 add、mul 填入位置 0、1
+$mod->assignTable("tbl", true, RefType::FuncRef, 2, 0);
+$mod->newActiveElement(0, 0, ["add", "mul"]);
+
+// 创建/复用函数类型，供 call_indirect 使用
+$typeIdx = $mod->newFnType([ValType::I32, ValType::I32], [ValType::I32]);
+
+// call_via_table(op, a, b)：op 为表索引
+$fn = $mod->newFn([
+    "name"    => "call_via_table",
+    "params"  => [ValType::I32, ValType::I32, ValType::I32],
+    "results" => [ValType::I32],
+]);
+$fn->getLocal(1)     // 参数 a
+   ->getLocal(2)     // 参数 b
+   ->getLocal(0)     // 表索引（栈顶）
+   ->callIndirect($typeIdx, 0);
+$mod->commit($fn);
+
+$mod->compile("./table.wasm");
+// call_via_table(0, 2, 3) === 5（add）
+// call_via_table(1, 2, 3) === 6（mul）
 ```

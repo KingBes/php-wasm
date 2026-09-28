@@ -16,6 +16,7 @@
 - [类型转换](#类型转换)
 - [控制流](#控制流)
 - [函数调用](#函数调用)
+- [表操作](#表操作)
 - [内存操作](#内存操作)
 - [引用操作](#引用操作)
 
@@ -66,6 +67,22 @@ public function const(int|float $val): self
 $fn->const(42)->const(3.14);
 ```
 
+### constI64 / constF64 — 压入 64 位常量
+
+```php
+public function constI64(int $val): self
+public function constF64(float $val): self
+```
+
+| 方法 | 生成指令 | 示例 |
+|---|---|---|
+| `constI64` | `i64.const` | `$fn->constI64(10000000000);` |
+| `constF64` | `f64.const` | `$fn->constF64(3.141592653589793);` |
+
+```php
+$fn->constI64(100)->constI64(200)->add(NumType::I64);
+```
+
 ---
 
 ## 局部变量
@@ -92,13 +109,16 @@ $fn->getLocal($localIdx)->teeLocal($localIdx); // 读取 i 同时保留栈顶
 
 | 方法 | 签名 | Wasm 指令 | 说明 |
 |---|---|---|---|
-| `getGlobal` | `(int $index): self` | `global.get` | 获取全局变量值压入栈 |
-| `setGlobal` | `(int $index): self` | `global.set` | 弹出栈顶值赋给全局变量 |
+| `getGlobal` | `(int $index): self` | `global.get` | 获取本地全局变量值压入栈 |
+| `setGlobal` | `(int $index): self` | `global.set` | 弹出栈顶值赋给本地全局变量 |
+| `getGlobalImport` | `(int $index): self` | `global.get` | 获取导入的全局变量值压入栈 |
+| `setGlobalImport` | `(int $index): self` | `global.set` | 弹出栈顶值赋给导入的全局变量 |
 
-全局变量索引由 `Module::newGlobal()` 或 `Module::newGlobaImp()` 返回。
+全局变量索引由 `Module::newGlobal()` 或 `Module::newGlobaImp()` 返回。本地全局变量与导入全局变量分别使用各自的方法。
 
 ```php
 $fn->getGlobal(0)->const(1)->add(NumType::I32)->setGlobal(0);
+$fn->getGlobalImport(0)->setGlobalImport(1);
 ```
 
 ---
@@ -154,6 +174,8 @@ $fn->const(1)->getLocal(0)->shl(NumType::I32);  // 1 << x
 $fn->getLocal(0)->shr(NumType::I32, true);       // 有符号右移
 ```
 
+> **兼容性说明**：`rotr(NumType::I64)` 按 Wasm 规范输出 `i64.rotr` 的 `0x8A`。上游 V 语言参考实现误写为 `0xA8`（该字节实为 `i32.trunc_f32_s`），本库有意修正。
+
 ---
 
 ## 比较运算
@@ -181,20 +203,24 @@ $fn->getLocal(0)->eqz(NumType::I32);                   // x == 0 ?
 
 | 方法 | Wasm 指令 | 说明 |
 |---|---|---|
-| `cast(NumType $from, bool $signed, NumType $to)` | `xx.convert_xx_s` 等 | 类型转换 |
-| `castTrapping(NumType $from, bool $signed, NumType $to)` | `xx.trunc_sat_xx_s` 等 | 饱和陷阱转换 |
+| `cast(NumType $from, bool $signed, NumType $to)` | 浮点→整数为 `xx.trunc_sat_xx_s`；浮点↔浮点为 `promote` / `demote`；整数间为 `convert` / `extend` / `wrap` | 非陷阱类型转换 |
+| `castTrapping(NumType $from, bool $signed, NumType $to)` | 浮点→整数为 `xx.trunc_xx_s`；其余同 `cast` | 陷阱类型转换（越界触发 trap） |
 | `reinterpret(NumType $typ)` | `xx.reinterpret_xx` | 位模式重解释 |
 | `signExtend8(ValType $typ)` | `xx.extend8_s` | 符号扩展 8 位 |
 | `signExtend16(ValType $typ)` | `xx.extend16_s` | 符号扩展 16 位 |
 | `signExtend32()` | `i64.extend32_s` | 符号扩展 32 位（i64 专用） |
 
 ```php
-$fn->getLocal(0)->cast(NumType::I32, true, NumType::I64);   // i32 -> i64 (有符号)
-$fn->getLocal(0)->reinterpret(NumType::F32);                 // f32.reinterpret_i32
+$fn->getLocal(0)->cast(NumType::I32, true, NumType::I64);   // i32 -> i64（有符号）
+$fn->getLocal(0)->reinterpret(NumType::F32);                 // i32.reinterpret_f32（把 f32 的位当作 i32）
 $fn->getLocal(0)->signExtend8(ValType::I32);                 // i32.extend8_s
 ```
 
-> **reinterpret 说明**：不改变底层位模式，仅改变解释方式。例如 `f32.reinterpret_i32` 将一个 i32 的位直接当作 f32 解释。
+> **cast 与 castTrapping 的区别**：两者仅在「浮点 → 整数」时不同。`cast` 使用饱和转换（`trunc_sat`，越界结果被截断到边界值，不触发 trap）；`castTrapping` 使用陷阱版（`trunc`，越界触发 trap）。其余类型组合两者编码相同。
+>
+> **`$signed` 的作用范围**：`$signed` 对整数源（`i32`/`i64`）与 `castTrapping` 的浮点源均生效；但 `cast` 在浮点源时**忽略 `$signed`**，固定生成有符号饱和指令（`trunc_sat_..._s`），此为上游参考实现的既有行为。
+
+> **reinterpret 说明**：`reinterpret(NumType $typ)` 的 `$typ` 是**源类型**，生成 `结果类型.reinterpret_源类型`。例如 `reinterpret(NumType::I32)` 生成 `f32.reinterpret_i32`，把栈顶 i32 的位模式直接当作 f32 解释——位不变、仅改变解释方式。
 
 ---
 
@@ -204,15 +230,16 @@ $fn->getLocal(0)->signExtend8(ValType::I32);                 // i32.extend8_s
 
 | 方法 | 签名 | 返回 |
 |---|---|---|
-| `block` | `(array $params, array $results): int` | 标签索引 |
-| `loop` | `(array $params, array $results): int` | 标签索引 |
-| `if_` | `(array $params, array $results): int` | 标签索引 |
+| `block` | `(array $params, array $results): int` | 标签句柄 |
+| `loop` | `(array $params, array $results): int` | 标签句柄 |
+| `if_` | `(array $params, array $results): int` | 标签句柄 |
 | `else_` | `(int $label): self` | — |
 | `end` | `(int $label): self` | — |
 
 ```php
-// if-else 基础用法
-$label = $if->if_([], [ValType::I32]);
+// if-else 基础用法：条件需在 if_() 之前压入
+$fn->getLocal(0)->const(0)->gt(NumType::I32, true); // 压入条件 (i32)
+$label = $fn->if_([], [ValType::I32]);
 // then 分支
 $fn->else_($label);
 // else 分支
@@ -225,22 +252,26 @@ $fn->end($label);
 
 | 方法 | 签名 | Wasm 指令 | 说明 |
 |---|---|---|---|
-| `br` | `(int $label): self` | `br` | 无条件跳转 |
-| `brIf` | `(int $label): self` | `br_if` | 条件跳转（弹出栈顶 i32） |
+| `br` | `(int $label): self` | `br` | 无条件跳转，`$label` 为块句柄 |
+| `brIf` | `(int $label): self` | `br_if` | 条件跳转（弹出栈顶 i32），`$label` 为块句柄 |
 | `return_` | `(): self` | `return` | 函数返回 |
 | `select` | `(): self` | `select` | 三目选择 |
 | `drop` | `(): self` | `drop` | 丢弃栈顶值 |
 | `unreachable` | `(): self` | `unreachable` | 不可达指令（触发陷阱） |
 | `nop` | `(): self` | `nop` | 空操作 |
 
-**标签标签工作原理**：`block`/`loop`/`if_` 创建块时会分配标签索引。`br(0)` 跳转到最内层块开头，`br(1)` 跳转到外一层。`return_` 直接退出函数。
+**标签工作原理**：`block` / `loop` / `if_` 返回一个**标签句柄**（label handle）。`br()` / `brIf()` 传入的是该句柄本身，而不是手写的相对深度；底层会自动换算：跳转到最内层块时深度为 `0`，向外每层递增 `1`。因此务必保存创建块时的返回值并传回，切勿手写 `0` / `1`。
 
 ```php
 // 循环示例：死循环
 $loopLabel = $fn->loop([], []);
-$fn->br(0);      // 跳回 loop 起始
+$fn->br($loopLabel);   // 跳回该 loop 起始（换算后相对深度为 0）
 $fn->end($loopLabel);
+```
 
+> **警告**：写成 `$fn->br(0)` 并不表示"跳回最内层"，而会被换算成相对深度 `1`（跳到外层），生成语义错误的跳转。始终使用 `block()` / `loop()` / `if_()` 的返回值。
+
+```php
 // select 示例：相当于 cond ? a : b
 $fn->getLocal(0)->getLocal(1)  // 压入 val1, val2
    ->getLocal(2)               // 压入 cond (i32)
@@ -251,16 +282,16 @@ $fn->getLocal(0)->getLocal(1)  // 压入 val1, val2
 
 | 方法 | 签名 | 说明 |
 |---|---|---|
-| `patchPos` | `(): int` | 获取当前指令位置（用于后续补丁） |
-| `patch` | `(int $loc, int $begin): self` | 在指定位置写入跳转偏移 |
+| `patchPos` | `(): int` | 获取当前代码末尾的字节偏移（用于后续补丁锚点） |
+| `patch` | `(int $loc, int $begin): self` | 把 `begin` 之后的指令搬到 `loc` 处，并同步修正已有补丁位置 |
 | `exportName` | `(string $name): self` | 设置函数的导出名称 |
 
-`patchPos` / `patch` 用于实现前向跳转（先占位置，后设置目标）：
+`patchPos()` 返回当前代码末尾的字节偏移，可作为代码段的锚点；`patch($loc, $begin)` 把 `$begin` 起至末尾的指令整体搬到 `$loc` 处，并同步调整既有补丁位置（要求 `$loc <= $begin`，当 `$loc === $begin` 时为空操作）：
 
 ```php
-$pos = $fn->patchPos();   // 记录当前位置
-// ... 生成中间指令 ...
-$fn->patch($pos, 0);       // 回填跳转位置
+$begin = $fn->patchPos();  // 记录要搬移的代码段起始位置
+// ... 生成一段代码 ...
+$fn->patch($loc, $begin);  // 把该代码段搬到 $loc 处
 ```
 
 ---
@@ -271,11 +302,39 @@ $fn->patch($pos, 0);       // 回填跳转位置
 |---|---|---|---|
 | `call` | `(string $name): self` | `call` | 调用模块内函数 |
 | `callImport` | `(string $mod_name, string $fn_name): self` | `call` | 调用导入的外部函数 |
+| `callIndirect` | `(int $typeidx, int $tableidx): self` | `call_indirect` | 经表间接调用 |
 
 ```php
 $fn->call("helper_fn");               // 调用内部函数
 $fn->callImport("env", "log");        // 调用导入函数
 ```
+
+> **callIndirect 栈顺序**：需先压入函数参数，最后压入表索引（栈顶）。`$typeidx` 由 `Module::newFnType()` 返回。
+
+```php
+// call_via_table(op, a, b)：先压 a、b，再压 op 作为表索引
+$fn->getLocal(1)->getLocal(2)->getLocal(0)->callIndirect($typeIdx, 0);
+```
+
+---
+
+## 表操作
+
+| 方法 | 签名 | Wasm 指令 | 说明 |
+|---|---|---|---|
+| `tableGet` | `(int $tableidx): self` | `table.get` | 读取表中元素 |
+| `tableSet` | `(int $tableidx): self` | `table.set` | 写入表中元素 |
+| `tableSize` | `(int $tableidx): self` | `table.size` | 获取表元素数量 |
+| `tableGrow` | `(int $tableidx): self` | `table.grow` | 增长表 |
+| `tableFill` | `(int $tableidx): self` | `table.fill` | 填充表 |
+
+```php
+$fn->getLocal(0)->tableGet(0);              // table.get 0
+$fn->getLocal(0)->getLocal(1)->tableSet(0); // table.set 0
+$fn->tableSize(0);                          // table.size 0
+```
+
+> **注意**：使用表操作前需通过 `Module::assignTable()` 声明表。
 
 ---
 
@@ -334,3 +393,5 @@ $fn->refFunc("my_func");                            // ref.func my_func
 $fn->refFuncImport("env", "callback");              // 导入函数引用
 $fn->refIsNull(RefType::ExternRef);                 // ref.is_null
 ```
+
+> **注意**：`ref.is_null` 指令本身不带立即数，`refIsNull()` 的 `$rt` 参数仅为与参考实现保持签名一致而保留，实际不参与编码。

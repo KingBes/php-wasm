@@ -16,9 +16,11 @@ php-wasm 提供三个枚举类型，用于定义 Wasm 值的类型。
 | `ValType::I64` | `i64` | 64 位整数 |
 | `ValType::F32` | `f32` | 32 位浮点数 |
 | `ValType::F64` | `f64` | 64 位浮点数 |
-| `ValType::V128` | `v128` | 128 位 SIMD 向量 |
+| `ValType::V128` | `v128` | 128 位 SIMD 向量（仅类型声明） |
 | `ValType::FuncRef` | `funcref` | 函数引用 |
 | `ValType::ExternRef` | `externref` | 外部引用 |
+
+> **说明**：`V128` 仅用于类型声明，常量表达式不接受 `v128`（构造时抛出 `InvalidArgumentException`），本库也未提供 SIMD 指令。
 
 ### data() 方法
 
@@ -26,11 +28,11 @@ php-wasm 提供三个枚举类型，用于定义 Wasm 值的类型。
 public function data(): int
 ```
 
-返回该枚举对应的 C 层整数值。
+返回该类型在 Wasm 二进制中的规范字节。
 
 ```php
 $val = ValType::I32;
-$cdata = $val->data(); // 返回 FFI 编码的值
+$byte = $val->data(); // 0x7F
 ```
 
 ### 使用场景
@@ -73,6 +75,8 @@ $localIdx = $fn->newLocal(ValType::F64);
 public function data(): int
 ```
 
+返回该类型在 Wasm 二进制中的规范字节（`I32`→`0x7F`、`I64`→`0x7E`、`F32`→`0x7D`、`F64`→`0x7C`）。
+
 ### 使用场景
 
 - `Func` 的算术运算：`add()`、`sub()`、`mul()`、`div()` 等
@@ -107,6 +111,8 @@ $fn->const(0)->load(NumType::I32, 2, 0);
 ```php
 public function data(): int
 ```
+
+返回该类型在 Wasm 二进制中的规范字节（`FuncRef`→`0x70`、`ExternRef`→`0x6F`）。
 
 ### 使用场景
 

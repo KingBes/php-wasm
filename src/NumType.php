@@ -2,8 +2,6 @@
 
 namespace Kingbes\Wasm;
 
-use Kingbes\Wasm\Base;
-
 /**
  * 数字类型枚举
  * @example ```php
@@ -18,7 +16,7 @@ enum NumType
     case F64;
 
     /**
-     * 获取数据
+     * 获取该类型在 Wasm 二进制中的规范字节
      * @example ```php
      * $num_type = NumType::I32;
      * $num_type->data();
@@ -27,12 +25,11 @@ enum NumType
      */
     public function data(): int
     {
-        $cdata = match ($this) {
-            self::I32 => "i32",
-            self::I64 => "i64",
-            self::F32 => "f32",
-            self::F64 => "f64"
+        return match ($this) {
+            self::I32 => 0x7F,
+            self::I64 => 0x7E,
+            self::F32 => 0x7D,
+            self::F64 => 0x7C,
         };
-        return Base::ffi()->help_num_type($cdata);
     }
 }

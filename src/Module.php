@@ -3,7 +3,7 @@
 namespace Kingbes\Wasm;
 
 use Kingbes\Wasm\Func;
-use \FFI\CData;
+use Kingbes\Wasm\Wasm\ModuleState;
 
 /**
  * 模块类
@@ -14,11 +14,11 @@ use \FFI\CData;
 class Module extends Base
 {
     /**
-     * 数据指针
+     * 模块状态
      *
-     * @var CData
+     * @var ModuleState
      */
-    public CData $mod;
+    public ModuleState $mod;
 
     /**
      * 构造函数
@@ -28,7 +28,7 @@ class Module extends Base
      */
     public function __construct()
     {
-        $this->mod = self::ffi()->create_mod();
+        $this->mod = new ModuleState();
     }
 
     /**
@@ -39,8 +39,8 @@ class Module extends Base
      * @example ```php
      * $config = [
      *     "name" => "add", // 函数名 必填
-     *     "params" => [ValType::INT32, ValType::INT32], // 请求参数类型 必填
-     *     "results" => [ValType::INT32], // 返回参数类型 必填
+     *     "params" => [ValType::I32, ValType::I32], // 请求参数类型 必填
+     *     "results" => [ValType::I32], // 返回参数类型 必填
      *     "param_names" => ["a", "b"], // debug 模式下必填，参数名数组，与params数组顺序一致
      *     "type_name" => "add_type", // debug 模式下必填，类型名称
      * ];
@@ -63,8 +63,8 @@ class Module extends Base
      * @param boolean $debug 是否开启调试模式
      * @example ```php
      * $config = [
-     *     "params" => [ValType::INT32, ValType::INT32], // 请求参数类型 必填
-     *     "results" => [ValType::INT32], // 返回参数类型 必填
+     *     "params" => [ValType::I32, ValType::I32], // 请求参数类型 必填
+     *     "results" => [ValType::I32], // 返回参数类型 必填
      *     "type_name" => "add_type", // debug 模式下必填，类型名称
      * ];
      * $mod = new Module();
@@ -78,20 +78,36 @@ class Module extends Base
         array $config,
         bool $debug = false
     ): void {
-        $c_params = $this->creatValTypeArr();
-        foreach ($config["params"] as $param) {
-            $c_params = $this->addValTypeArr($c_params, $param);
-        }
-        $c_results = $this->creatValTypeArr();
-        foreach ($config["results"] as $res) {
-            $c_results = $this->addValTypeArr($c_results, $res);
-        }
         if ($debug) {
             $fun_type = new FunType($config["params"], $config["results"], $config["type_name"]);
-            self::ffi()->new_fn_import_debug($this->mod, $mod_name, $fn_name, $fun_type);
+            $this->mod->newFunctionImportDebug($mod_name, $fn_name, $fun_type->data);
         } else {
-            self::ffi()->new_fn_import($this->mod, $mod_name, $fn_name, $c_params, $c_results);
+            $this->mod->newFunctionImport(
+                $mod_name,
+                $fn_name,
+                $this->typeBytes($config["params"]),
+                $this->typeBytes($config["results"])
+            );
         }
+    }
+
+    /**
+     * 创建函数类型并返回其类型索引
+     *
+     * 相同签名的类型会被复用（驻留），返回的索引可用于 `call_indirect`。
+     *
+     * @param array<ValType> $params 请求参数类型
+     * @param array<ValType> $results 返回参数类型
+     * @param string|null $type_name 类型名称（仅调试信息使用）
+     * @example ```php
+     * $mod = new Module();
+     * $type_idx = $mod->newFnType([ValType::I32, ValType::I32], [ValType::I32]);
+     * ```
+     * @return integer 类型索引
+     */
+    public function newFnType(array $params, array $results, ?string $type_name = null): int
+    {
+        return $this->mod->newFnType($this->typeBytes($params), $this->typeBytes($results), $type_name);
     }
 
     /**
@@ -115,14 +131,7 @@ class Module extends Base
         bool $mut,
         ConstExpression $init
     ): int {
-        return self::ffi()->new_global(
-            $this->mod,
-            $name,
-            $exp,
-            $vty->data(),
-            $mut,
-            $init
-        );
+        return $this->mod->newGlobal($name, $exp, $vty->data(), $mut, $init->data);
     }
 
     /**
@@ -140,7 +149,7 @@ class Module extends Base
         ValType $vty,
         bool $mut
     ): int {
-        return self::ffi()->new_global_import($this->mod, $mod_name, $global_name, $vty->data(), $mut);
+        return $this->mod->newGlobalImport($mod_name, $global_name, $vty->data(), $mut);
     }
 
     /**
@@ -156,7 +165,7 @@ class Module extends Base
      */
     public function assignGlobalInit(int $index, ConstExpression $init): void
     {
-        self::ffi()->assign_global_init($this->mod, $index, $init);
+        $this->mod->assignGlobalInit($index, $init->data);
     }
 
     /**
@@ -165,7 +174,7 @@ class Module extends Base
      * @param string $name 内存段名称
      * @param boolean $exp 是否导出内存
      * @param integer $min 最小内存页数（每页 64KB）
-     * @param integer $max 最大内存页数
+     * @param integer $max 最大内存页数，0 表示无上限
      * @example ```php
      * $mod = new Module();
      * $mod->assignMemory("mem", true, 1, 10);
@@ -174,7 +183,7 @@ class Module extends Base
      */
     public function assignMemory(string $name, bool $exp, int $min, int $max): void
     {
-        self::ffi()->assign_memory($this->mod, $name, $exp, $min, $max);
+        $this->mod->assignMemory($name, $exp, $min, $max === 0 ? null : $max);
     }
 
     /**
@@ -189,7 +198,58 @@ class Module extends Base
      */
     public function assignStart(string $name): void
     {
-        self::ffi()->assign_start($this->mod, $name);
+        $this->mod->assignStart($name);
+    }
+
+    /**
+     * 声明一个表并返回其索引
+     *
+     * @param string $name 表名称
+     * @param boolean $exp 是否导出
+     * @param RefType $reftype 元素类型
+     * @param integer $min 最小元素数量
+     * @param integer $max 最大元素数量，0 表示无上限
+     * @example ```php
+     * $mod = new Module();
+     * $table_idx = $mod->assignTable("tbl", true, RefType::FuncRef, 1, 0);
+     * ```
+     * @return integer 表索引
+     */
+    public function assignTable(string $name, bool $exp, RefType $reftype, int $min, int $max): int
+    {
+        return $this->mod->assignTable($name, $exp, $reftype->data(), $min, $max === 0 ? null : $max);
+    }
+
+    /**
+     * 创建主动元素段，用于初始化表
+     *
+     * @param integer $tableidx 表索引
+     * @param integer $offset 起始位置
+     * @param array<string> $funcs 函数名称数组
+     * @example ```php
+     * $mod = new Module();
+     * $mod->newActiveElement(0, 0, ["add"]);
+     * ```
+     * @return integer 元素段索引
+     */
+    public function newActiveElement(int $tableidx, int $offset, array $funcs): int
+    {
+        return $this->mod->newActiveElement($tableidx, $offset, $funcs);
+    }
+
+    /**
+     * 创建声明式元素段，用于声明函数引用（不占用表空间）
+     *
+     * @param array<string> $funcs 函数名称数组
+     * @example ```php
+     * $mod = new Module();
+     * $mod->newDeclarativeElement(["add"]);
+     * ```
+     * @return integer 元素段索引
+     */
+    public function newDeclarativeElement(array $funcs): int
+    {
+        return $this->mod->newDeclarativeElement($funcs);
     }
 
     /**
@@ -205,7 +265,7 @@ class Module extends Base
      */
     public function commit(Func $fn, bool $is_export = true)
     {
-        self::ffi()->mod_commit($this->mod, $fn->fn, $is_export);
+        $this->mod->commit($fn->fn, $is_export);
     }
 
     /**
@@ -220,7 +280,21 @@ class Module extends Base
      */
     public function compile(string $file): bool
     {
-        return self::ffi()->mod_compile($file, $this->mod);
+        return file_put_contents($file, $this->mod->compile()) !== false;
+    }
+
+    /**
+     * 编译模块并返回二进制字节
+     *
+     * @example ```php
+     * $mod = new Module();
+     * $bytes = $mod->toBytes();
+     * ```
+     * @return string
+     */
+    public function toBytes(): string
+    {
+        return $this->mod->compile();
     }
 
     /**
@@ -235,7 +309,7 @@ class Module extends Base
      */
     public function enableDebug(string $name): void
     {
-        self::ffi()->mod_enable_debug($this->mod, $name);
+        $this->mod->enableDebug($name);
     }
 
     /**
@@ -252,8 +326,7 @@ class Module extends Base
      */
     public function newDataSegment(string $name, int $pos, string $data): int
     {
-        $c_data = self::ffi()->help_str_to_u8s($data);
-        return self::ffi()->mod_new_data_segment($this->mod, $name, $pos, $c_data);
+        return $this->mod->newDataSegment($name, $pos, $data);
     }
 
     /**
@@ -269,7 +342,21 @@ class Module extends Base
      */
     public function newPassiveDataSegment(string $name, string $data): void
     {
-        $c_data = self::ffi()->help_str_to_u8s($data);
-        self::ffi()->mod_new_passive_data_segment($this->mod, $name, $c_data);
+        $this->mod->newPassiveDataSegment($name, $data);
+    }
+
+    /**
+     * 把值类型数组转换为规范字节数组
+     *
+     * @param array<ValType> $types
+     * @return array<int,int>
+     */
+    private function typeBytes(array $types): array
+    {
+        $out = [];
+        foreach ($types as $type) {
+            $out[] = $type->data();
+        }
+        return $out;
     }
 }

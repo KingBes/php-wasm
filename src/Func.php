@@ -2,53 +2,47 @@
 
 namespace Kingbes\Wasm;
 
-use \FFI\CData;
+use Kingbes\Wasm\Wasm\Encoder;
+use Kingbes\Wasm\Wasm\FunctionState;
+use Kingbes\Wasm\Wasm\ModuleState;
 
 class Func extends Base
 {
     /**
-     * 数据指针
+     * 函数状态
      *
-     * @var CData
+     * @var FunctionState
      */
-    public CData $fn;
+    public FunctionState $fn;
 
     /**
      * 构造函数
      *
-     * @param CData $mod 模块对象指针
+     * @param ModuleState $mod 模块状态
      * @param array<string, array<ValType|string>|string> $config 函数配置
      * @param boolean $debug 是否开启调试模式
      * @example ```php
      * $config = [
      *     "name" => "add", // 函数名 必填
-     *     "params" => [ValType::INT32, ValType::INT32], // 请求参数类型 必填
-     *     "results" => [ValType::INT32], // 返回参数类型 必填
+     *     "params" => [ValType::I32, ValType::I32], // 请求参数类型 必填
+     *     "results" => [ValType::I32], // 返回参数类型 必填
      *     "param_names" => ["a", "b"], // debug 模式下必填，参数名数组，与params数组顺序一致
      *     "type_name" => "add_type", // debug 模式下必填，类型名称
      * ];
      * $func = new Func($mod, $config, true);
      * ```
      */
-    public function __construct(CData $mod, array $config, bool $debug = false)
+    public function __construct(ModuleState $mod, array $config, bool $debug = false)
     {
-        $c_param = $this->creatValTypeArr();
-        foreach ($config["params"] as $param) {
-            $c_param = $this->addValTypeArr($c_param, $param);
-        }
-        $c_results = $this->creatValTypeArr();
-        foreach ($config["results"] as $res) {
-            $c_results = $this->addValTypeArr($c_results, $res);
-        }
         if ($debug) {
-            $c_param_names = $this->creatStrArr();
-            foreach ($config["param_names"] as $param_name) {
-                $c_param_names = $this->addStrArr($c_param_names, $param_name);
-            }
             $fun_type = new FunType($config["params"], $config["results"], $config["type_name"]);
-            $this->fn = self::ffi()->new_debug_fn($mod, $config["name"], $fun_type->data, $c_param_names);
+            $this->fn = $mod->newDebugFunction($config["name"], $fun_type->data, $config["param_names"]);
         } else {
-            $this->fn = self::ffi()->new_fn($mod, $config["name"], $c_param, $c_results);
+            $this->fn = $mod->newFunction(
+                $config["name"],
+                $this->typeBytes($config["params"]),
+                $this->typeBytes($config["results"])
+            );
         }
     }
 
@@ -61,10 +55,40 @@ class Func extends Base
     public function const(int|float $val): self
     {
         if (is_int($val)) {
-            self::ffi()->fn_i32_const($this->fn, $val);
+            Encoder::i32Const($this->fn, $val);
         } else {
-            self::ffi()->fn_f32_const($this->fn, $val);
+            Encoder::f32Const($this->fn, $val);
         }
+        return $this;
+    }
+
+    /**
+     * i64 常量
+     *
+     * @param integer $val 常量值
+     * @example ```php
+     * $fn->constI64(100);
+     * ```
+     * @return self
+     */
+    public function constI64(int $val): self
+    {
+        Encoder::i64Const($this->fn, $val);
+        return $this;
+    }
+
+    /**
+     * f64 常量
+     *
+     * @param float $val 常量值
+     * @example ```php
+     * $fn->constF64(1.5);
+     * ```
+     * @return self
+     */
+    public function constF64(float $val): self
+    {
+        Encoder::f64Const($this->fn, $val);
         return $this;
     }
 
@@ -76,7 +100,9 @@ class Func extends Base
      */
     public function newLocal(ValType $vty): int
     {
-        return self::ffi()->fn_new_local($this->fn, $vty->data());
+        $idx = count($this->fn->locals);
+        $this->fn->locals[] = ['type' => $vty->data(), 'name' => null];
+        return $idx;
     }
 
     /**
@@ -87,7 +113,7 @@ class Func extends Base
      */
     public function getLocal(int $index): self
     {
-        self::ffi()->fn_local_get($this->fn, $index);
+        Encoder::localGet($this->fn, $index);
         return $this;
     }
 
@@ -100,7 +126,9 @@ class Func extends Base
      */
     public function newLocalNamed(ValType $vty, string $name): int
     {
-        return self::ffi()->fn_new_local_named($this->fn, $vty->data(), $name);
+        $idx = count($this->fn->locals);
+        $this->fn->locals[] = ['type' => $vty->data(), 'name' => $name];
+        return $idx;
     }
 
     /**
@@ -111,7 +139,7 @@ class Func extends Base
      */
     public function setLocal(int $index): self
     {
-        self::ffi()->fn_local_set($this->fn, $index);
+        Encoder::localSet($this->fn, $index);
         return $this;
     }
 
@@ -123,7 +151,7 @@ class Func extends Base
      */
     public function teeLocal(int $index): self
     {
-        self::ffi()->fn_local_tee($this->fn, $index);
+        Encoder::localTee($this->fn, $index);
         return $this;
     }
 
@@ -137,7 +165,7 @@ class Func extends Base
      */
     public function getGlobal(int $index): self
     {
-        self::ffi()->fn_global_get($this->fn, $index);
+        Encoder::globalGet($this->fn, $index);
         return $this;
     }
 
@@ -149,7 +177,37 @@ class Func extends Base
      */
     public function setGlobal(int $index): self
     {
-        self::ffi()->fn_global_set($this->fn, $index);
+        Encoder::globalSet($this->fn, $index);
+        return $this;
+    }
+
+    /**
+     * 获取导入的全局变量
+     *
+     * @param integer $index 导入全局变量索引
+     * @example ```php
+     * $fn->getGlobalImport(0);
+     * ```
+     * @return self
+     */
+    public function getGlobalImport(int $index): self
+    {
+        Encoder::globalGetImport($this->fn, $index);
+        return $this;
+    }
+
+    /**
+     * 设置导入的全局变量
+     *
+     * @param integer $index 导入全局变量索引
+     * @example ```php
+     * $fn->setGlobalImport(0);
+     * ```
+     * @return self
+     */
+    public function setGlobalImport(int $index): self
+    {
+        Encoder::globalSetImport($this->fn, $index);
         return $this;
     }
 
@@ -163,7 +221,7 @@ class Func extends Base
      */
     public function add(NumType $typ): self
     {
-        self::ffi()->fn_add($this->fn, $typ->data());
+        Encoder::byNum($this->fn, 'add', $typ->data());
         return $this;
     }
 
@@ -175,7 +233,7 @@ class Func extends Base
      */
     public function sub(NumType $typ): self
     {
-        self::ffi()->fn_sub($this->fn, $typ->data());
+        Encoder::byNum($this->fn, 'sub', $typ->data());
         return $this;
     }
 
@@ -187,7 +245,7 @@ class Func extends Base
      */
     public function mul(NumType $typ): self
     {
-        self::ffi()->fn_mul($this->fn, $typ->data());
+        Encoder::byNum($this->fn, 'mul', $typ->data());
         return $this;
     }
 
@@ -200,7 +258,7 @@ class Func extends Base
      */
     public function div(NumType $typ, bool $signed = false): self
     {
-        self::ffi()->fn_div($this->fn, $typ->data(), $signed);
+        Encoder::bySign($this->fn, 'div', $typ->data(), $signed);
         return $this;
     }
 
@@ -213,7 +271,7 @@ class Func extends Base
      */
     public function rem(NumType $typ, bool $signed = false): self
     {
-        self::ffi()->fn_rem($this->fn, $typ->data(), $signed);
+        Encoder::intOnlySign($this->fn, 'rem', $typ->data(), $signed);
         return $this;
     }
 
@@ -225,7 +283,7 @@ class Func extends Base
      */
     public function abs(NumType $typ): self
     {
-        self::ffi()->fn_abs($this->fn, $typ->data());
+        Encoder::floatOnly($this->fn, 'abs', $typ->data());
         return $this;
     }
 
@@ -237,7 +295,7 @@ class Func extends Base
      */
     public function neg(NumType $typ): self
     {
-        self::ffi()->fn_neg($this->fn, $typ->data());
+        Encoder::floatOnly($this->fn, 'neg', $typ->data());
         return $this;
     }
 
@@ -249,7 +307,7 @@ class Func extends Base
      */
     public function ceil(NumType $typ): self
     {
-        self::ffi()->fn_ceil($this->fn, $typ->data());
+        Encoder::floatOnly($this->fn, 'ceil', $typ->data());
         return $this;
     }
 
@@ -261,7 +319,7 @@ class Func extends Base
      */
     public function floor(NumType $typ): self
     {
-        self::ffi()->fn_floor($this->fn, $typ->data());
+        Encoder::floatOnly($this->fn, 'floor', $typ->data());
         return $this;
     }
 
@@ -273,7 +331,7 @@ class Func extends Base
      */
     public function trunc(NumType $typ): self
     {
-        self::ffi()->fn_trunc($this->fn, $typ->data());
+        Encoder::floatOnly($this->fn, 'trunc', $typ->data());
         return $this;
     }
 
@@ -285,7 +343,7 @@ class Func extends Base
      */
     public function nearest(NumType $typ): self
     {
-        self::ffi()->fn_nearest($this->fn, $typ->data());
+        Encoder::floatOnly($this->fn, 'nearest', $typ->data());
         return $this;
     }
 
@@ -297,7 +355,7 @@ class Func extends Base
      */
     public function sqrt(NumType $typ): self
     {
-        self::ffi()->fn_sqrt($this->fn, $typ->data());
+        Encoder::floatOnly($this->fn, 'sqrt', $typ->data());
         return $this;
     }
 
@@ -309,7 +367,7 @@ class Func extends Base
      */
     public function min(NumType $typ): self
     {
-        self::ffi()->fn_min($this->fn, $typ->data());
+        Encoder::floatOnly($this->fn, 'min', $typ->data());
         return $this;
     }
 
@@ -321,7 +379,7 @@ class Func extends Base
      */
     public function max(NumType $typ): self
     {
-        self::ffi()->fn_max($this->fn, $typ->data());
+        Encoder::floatOnly($this->fn, 'max', $typ->data());
         return $this;
     }
 
@@ -333,7 +391,7 @@ class Func extends Base
      */
     public function copysign(NumType $typ): self
     {
-        self::ffi()->fn_copysign($this->fn, $typ->data());
+        Encoder::floatOnly($this->fn, 'copysign', $typ->data());
         return $this;
     }
 
@@ -347,7 +405,7 @@ class Func extends Base
      */
     public function band(NumType $typ): self
     {
-        self::ffi()->fn_b_and($this->fn, $typ->data());
+        Encoder::intOnly($this->fn, 'band', $typ->data());
         return $this;
     }
 
@@ -359,7 +417,7 @@ class Func extends Base
      */
     public function bor(NumType $typ): self
     {
-        self::ffi()->fn_b_or($this->fn, $typ->data());
+        Encoder::intOnly($this->fn, 'bor', $typ->data());
         return $this;
     }
 
@@ -371,7 +429,7 @@ class Func extends Base
      */
     public function bxor(NumType $typ): self
     {
-        self::ffi()->fn_b_xor($this->fn, $typ->data());
+        Encoder::intOnly($this->fn, 'bxor', $typ->data());
         return $this;
     }
 
@@ -383,7 +441,7 @@ class Func extends Base
      */
     public function shl(NumType $typ): self
     {
-        self::ffi()->fn_b_shl($this->fn, $typ->data());
+        Encoder::intOnly($this->fn, 'shl', $typ->data());
         return $this;
     }
 
@@ -396,7 +454,7 @@ class Func extends Base
      */
     public function shr(NumType $typ, bool $signed = false): self
     {
-        self::ffi()->fn_b_shr($this->fn, $typ->data(), $signed);
+        Encoder::intOnlySign($this->fn, 'shr', $typ->data(), $signed);
         return $this;
     }
 
@@ -408,7 +466,7 @@ class Func extends Base
      */
     public function clz(NumType $typ): self
     {
-        self::ffi()->fn_clz($this->fn, $typ->data());
+        Encoder::intOnly($this->fn, 'clz', $typ->data());
         return $this;
     }
 
@@ -420,7 +478,7 @@ class Func extends Base
      */
     public function ctz(NumType $typ): self
     {
-        self::ffi()->fn_ctz($this->fn, $typ->data());
+        Encoder::intOnly($this->fn, 'ctz', $typ->data());
         return $this;
     }
 
@@ -432,7 +490,7 @@ class Func extends Base
      */
     public function popcnt(NumType $typ): self
     {
-        self::ffi()->fn_popcnt($this->fn, $typ->data());
+        Encoder::intOnly($this->fn, 'popcnt', $typ->data());
         return $this;
     }
 
@@ -444,7 +502,7 @@ class Func extends Base
      */
     public function rotl(NumType $typ): self
     {
-        self::ffi()->fn_rotl($this->fn, $typ->data());
+        Encoder::intOnly($this->fn, 'rotl', $typ->data());
         return $this;
     }
 
@@ -456,7 +514,7 @@ class Func extends Base
      */
     public function rotr(NumType $typ): self
     {
-        self::ffi()->fn_rotr($this->fn, $typ->data());
+        Encoder::intOnly($this->fn, 'rotr', $typ->data());
         return $this;
     }
 
@@ -470,7 +528,7 @@ class Func extends Base
      */
     public function eqz(NumType $typ): self
     {
-        self::ffi()->fn_eqz($this->fn, $typ->data());
+        Encoder::intOnly($this->fn, 'eqz', $typ->data());
         return $this;
     }
 
@@ -482,7 +540,7 @@ class Func extends Base
      */
     public function eq(NumType $typ): self
     {
-        self::ffi()->fn_eq($this->fn, $typ->data());
+        Encoder::byNum($this->fn, 'eq', $typ->data());
         return $this;
     }
 
@@ -494,7 +552,7 @@ class Func extends Base
      */
     public function ne(NumType $typ): self
     {
-        self::ffi()->fn_ne($this->fn, $typ->data());
+        Encoder::byNum($this->fn, 'ne', $typ->data());
         return $this;
     }
 
@@ -507,7 +565,7 @@ class Func extends Base
      */
     public function lt(NumType $typ, bool $signed = false): self
     {
-        self::ffi()->fn_lt($this->fn, $typ->data(), $signed);
+        Encoder::bySign($this->fn, 'lt', $typ->data(), $signed);
         return $this;
     }
 
@@ -520,7 +578,7 @@ class Func extends Base
      */
     public function gt(NumType $typ, bool $signed = false): self
     {
-        self::ffi()->fn_gt($this->fn, $typ->data(), $signed);
+        Encoder::bySign($this->fn, 'gt', $typ->data(), $signed);
         return $this;
     }
 
@@ -533,7 +591,7 @@ class Func extends Base
      */
     public function le(NumType $typ, bool $signed = false): self
     {
-        self::ffi()->fn_le($this->fn, $typ->data(), $signed);
+        Encoder::bySign($this->fn, 'le', $typ->data(), $signed);
         return $this;
     }
 
@@ -546,7 +604,7 @@ class Func extends Base
      */
     public function ge(NumType $typ, bool $signed = false): self
     {
-        self::ffi()->fn_ge($this->fn, $typ->data(), $signed);
+        Encoder::bySign($this->fn, 'ge', $typ->data(), $signed);
         return $this;
     }
 
@@ -562,7 +620,7 @@ class Func extends Base
      */
     public function cast(NumType $from, bool $signed, NumType $to): self
     {
-        self::ffi()->fn_cast($this->fn, $from->data(), $signed, $to->data());
+        Encoder::cast($this->fn, $from->data(), $signed, $to->data());
         return $this;
     }
 
@@ -576,7 +634,7 @@ class Func extends Base
      */
     public function castTrapping(NumType $from, bool $signed, NumType $to): self
     {
-        self::ffi()->fn_cast_trapping($this->fn, $from->data(), $signed, $to->data());
+        Encoder::castTrapping($this->fn, $from->data(), $signed, $to->data());
         return $this;
     }
 
@@ -588,7 +646,7 @@ class Func extends Base
      */
     public function reinterpret(NumType $typ): self
     {
-        self::ffi()->fn_reinterpret($this->fn, $typ->data());
+        Encoder::reinterpret($this->fn, $typ->data());
         return $this;
     }
 
@@ -600,7 +658,7 @@ class Func extends Base
      */
     public function signExtend8(ValType $typ): self
     {
-        self::ffi()->fn_sign_extend8($this->fn, $typ->data());
+        Encoder::intOnly($this->fn, 'signExtend8', $typ->data());
         return $this;
     }
 
@@ -612,7 +670,7 @@ class Func extends Base
      */
     public function signExtend16(ValType $typ): self
     {
-        self::ffi()->fn_sign_extend16($this->fn, $typ->data());
+        Encoder::intOnly($this->fn, 'signExtend16', $typ->data());
         return $this;
     }
 
@@ -623,7 +681,7 @@ class Func extends Base
      */
     public function signExtend32(): self
     {
-        self::ffi()->fn_sign_extend32($this->fn);
+        Encoder::simple($this->fn, 'signExtend32');
         return $this;
     }
 
@@ -638,15 +696,7 @@ class Func extends Base
      */
     public function block(array $params, array $results): int
     {
-        $c_params = $this->creatValTypeArr();
-        foreach ($params as $p) {
-            $c_params = $this->addValTypeArr($c_params, $p);
-        }
-        $c_results = $this->creatValTypeArr();
-        foreach ($results as $r) {
-            $c_results = $this->addValTypeArr($c_results, $r);
-        }
-        return self::ffi()->fn_c_block($this->fn, $c_params, $c_results);
+        return Encoder::block($this->fn, $this->typeBytes($params), $this->typeBytes($results));
     }
 
     /**
@@ -658,15 +708,7 @@ class Func extends Base
      */
     public function loop(array $params, array $results): int
     {
-        $c_params = $this->creatValTypeArr();
-        foreach ($params as $p) {
-            $c_params = $this->addValTypeArr($c_params, $p);
-        }
-        $c_results = $this->creatValTypeArr();
-        foreach ($results as $r) {
-            $c_results = $this->addValTypeArr($c_results, $r);
-        }
-        return self::ffi()->fn_c_loop($this->fn, $c_params, $c_results);
+        return Encoder::loop($this->fn, $this->typeBytes($params), $this->typeBytes($results));
     }
 
     /**
@@ -678,15 +720,7 @@ class Func extends Base
      */
     public function if_(array $params, array $results): int
     {
-        $c_params = $this->creatValTypeArr();
-        foreach ($params as $p) {
-            $c_params = $this->addValTypeArr($c_params, $p);
-        }
-        $c_results = $this->creatValTypeArr();
-        foreach ($results as $r) {
-            $c_results = $this->addValTypeArr($c_results, $r);
-        }
-        return self::ffi()->fn_c_if($this->fn, $c_params, $c_results);
+        return Encoder::cIf($this->fn, $this->typeBytes($params), $this->typeBytes($results));
     }
 
     /**
@@ -697,7 +731,7 @@ class Func extends Base
      */
     public function else_(int $label): self
     {
-        self::ffi()->fn_c_else($this->fn, $label);
+        Encoder::cElse($this->fn, $label);
         return $this;
     }
 
@@ -709,7 +743,7 @@ class Func extends Base
      */
     public function end(int $label): self
     {
-        self::ffi()->fn_c_end($this->fn, $label);
+        Encoder::cEnd($this->fn, $label);
         return $this;
     }
 
@@ -721,7 +755,7 @@ class Func extends Base
      */
     public function br(int $label): self
     {
-        self::ffi()->fn_c_br($this->fn, $label);
+        Encoder::cBr($this->fn, $label);
         return $this;
     }
 
@@ -733,7 +767,7 @@ class Func extends Base
      */
     public function brIf(int $label): self
     {
-        self::ffi()->fn_c_br_if($this->fn, $label);
+        Encoder::cBrIf($this->fn, $label);
         return $this;
     }
 
@@ -744,7 +778,7 @@ class Func extends Base
      */
     public function return_(): self
     {
-        self::ffi()->fn_c_return($this->fn);
+        Encoder::simple($this->fn, 'return');
         return $this;
     }
 
@@ -755,7 +789,7 @@ class Func extends Base
      */
     public function select(): self
     {
-        self::ffi()->fn_c_select($this->fn);
+        Encoder::simple($this->fn, 'select');
         return $this;
     }
 
@@ -766,7 +800,7 @@ class Func extends Base
      */
     public function drop(): self
     {
-        self::ffi()->fn_drop($this->fn);
+        Encoder::simple($this->fn, 'drop');
         return $this;
     }
 
@@ -777,7 +811,7 @@ class Func extends Base
      */
     public function unreachable(): self
     {
-        self::ffi()->fn_unreachable($this->fn);
+        Encoder::simple($this->fn, 'unreachable');
         return $this;
     }
 
@@ -788,7 +822,7 @@ class Func extends Base
      */
     public function nop(): self
     {
-        self::ffi()->fn_nop($this->fn);
+        Encoder::simple($this->fn, 'nop');
         return $this;
     }
 
@@ -799,7 +833,7 @@ class Func extends Base
      */
     public function patchPos(): int
     {
-        return self::ffi()->fn_patch_pos($this->fn);
+        return $this->fn->patchPos();
     }
 
     /**
@@ -811,7 +845,7 @@ class Func extends Base
      */
     public function patch(int $loc, int $begin): self
     {
-        self::ffi()->fn_patch($this->fn, $loc, $begin);
+        $this->fn->patch($loc, $begin);
         return $this;
     }
 
@@ -823,7 +857,7 @@ class Func extends Base
      */
     public function exportName(string $name): self
     {
-        self::ffi()->fn_export_name($this->fn, $name);
+        $this->fn->exportName = $name;
         return $this;
     }
 
@@ -837,7 +871,7 @@ class Func extends Base
      */
     public function call(string $name): self
     {
-        self::ffi()->fn_call($this->fn, $name);
+        Encoder::call($this->fn, $name);
         return $this;
     }
 
@@ -850,7 +884,25 @@ class Func extends Base
      */
     public function callImport(string $mod_name, string $fn_name): self
     {
-        self::ffi()->fn_call_import($this->fn, $mod_name, $fn_name);
+        Encoder::callImport($this->fn, $mod_name, $fn_name);
+        return $this;
+    }
+
+    /**
+     * 间接调用表中的函数
+     *
+     * 函数索引从栈上弹出（i32）。类型索引可通过 `Module::newFnType` 获取。
+     *
+     * @param integer $typeidx 类型索引
+     * @param integer $tableidx 表索引
+     * @example ```php
+     * $fn->callIndirect($type_idx, 0);
+     * ```
+     * @return self
+     */
+    public function callIndirect(int $typeidx, int $tableidx): self
+    {
+        Encoder::callIndirect($this->fn, $typeidx, $tableidx);
         return $this;
     }
 
@@ -866,7 +918,7 @@ class Func extends Base
      */
     public function load(NumType $typ, int $align, int $offset): self
     {
-        self::ffi()->fn_load($this->fn, $typ->data(), $align, $offset);
+        Encoder::load($this->fn, $typ->data(), $align, $offset);
         return $this;
     }
 
@@ -881,7 +933,7 @@ class Func extends Base
      */
     public function load8(NumType $typ, bool $signed, int $align, int $offset): self
     {
-        self::ffi()->fn_load8($this->fn, $typ->data(), $signed, $align, $offset);
+        Encoder::load8($this->fn, $typ->data(), $signed, $align, $offset);
         return $this;
     }
 
@@ -896,7 +948,7 @@ class Func extends Base
      */
     public function load16(NumType $typ, bool $signed, int $align, int $offset): self
     {
-        self::ffi()->fn_load16($this->fn, $typ->data(), $signed, $align, $offset);
+        Encoder::load16($this->fn, $typ->data(), $signed, $align, $offset);
         return $this;
     }
 
@@ -910,7 +962,7 @@ class Func extends Base
      */
     public function load32I64(bool $signed, int $align, int $offset): self
     {
-        self::ffi()->fn_load32_i64($this->fn, $signed, $align, $offset);
+        Encoder::load32I64($this->fn, $signed, $align, $offset);
         return $this;
     }
 
@@ -924,7 +976,7 @@ class Func extends Base
      */
     public function store(NumType $typ, int $align, int $offset): self
     {
-        self::ffi()->fn_store($this->fn, $typ->data(), $align, $offset);
+        Encoder::store($this->fn, $typ->data(), $align, $offset);
         return $this;
     }
 
@@ -938,7 +990,7 @@ class Func extends Base
      */
     public function store8(NumType $typ, int $align, int $offset): self
     {
-        self::ffi()->fn_store8($this->fn, $typ->data(), $align, $offset);
+        Encoder::store8($this->fn, $typ->data(), $align, $offset);
         return $this;
     }
 
@@ -952,7 +1004,7 @@ class Func extends Base
      */
     public function store16(NumType $typ, int $align, int $offset): self
     {
-        self::ffi()->fn_store16($this->fn, $typ->data(), $align, $offset);
+        Encoder::store16($this->fn, $typ->data(), $align, $offset);
         return $this;
     }
 
@@ -965,7 +1017,7 @@ class Func extends Base
      */
     public function store32I64(int $align, int $offset): self
     {
-        self::ffi()->fn_store32_i64($this->fn, $align, $offset);
+        Encoder::store32I64($this->fn, $align, $offset);
         return $this;
     }
 
@@ -976,7 +1028,7 @@ class Func extends Base
      */
     public function memorySize(): self
     {
-        self::ffi()->fn_memory_size($this->fn);
+        Encoder::simple($this->fn, 'memorySize');
         return $this;
     }
 
@@ -987,7 +1039,7 @@ class Func extends Base
      */
     public function memoryGrow(): self
     {
-        self::ffi()->fn_memory_grow($this->fn);
+        Encoder::simple($this->fn, 'memoryGrow');
         return $this;
     }
 
@@ -999,7 +1051,7 @@ class Func extends Base
      */
     public function memoryInit(int $idx): self
     {
-        self::ffi()->fn_memory_init($this->fn, $idx);
+        Encoder::memoryInit($this->fn, $idx);
         return $this;
     }
 
@@ -1011,7 +1063,7 @@ class Func extends Base
      */
     public function dataDrop(int $idx): self
     {
-        self::ffi()->fn_data_drop($this->fn, $idx);
+        Encoder::dataDrop($this->fn, $idx);
         return $this;
     }
 
@@ -1022,7 +1074,7 @@ class Func extends Base
      */
     public function memoryCopy(): self
     {
-        self::ffi()->fn_memory_copy($this->fn);
+        Encoder::simple($this->fn, 'memoryCopy');
         return $this;
     }
 
@@ -1033,7 +1085,7 @@ class Func extends Base
      */
     public function memoryFill(): self
     {
-        self::ffi()->fn_memory_fill($this->fn);
+        Encoder::simple($this->fn, 'memoryFill');
         return $this;
     }
 
@@ -1047,7 +1099,7 @@ class Func extends Base
      */
     public function refNull(RefType $rt): self
     {
-        self::ffi()->fn_ref_null($this->fn, $rt->data());
+        Encoder::refNull($this->fn, $rt->data());
         return $this;
     }
 
@@ -1059,7 +1111,7 @@ class Func extends Base
      */
     public function refFunc(string $name): self
     {
-        self::ffi()->fn_ref_func($this->fn, $name);
+        Encoder::refFunc($this->fn, $name);
         return $this;
     }
 
@@ -1072,7 +1124,7 @@ class Func extends Base
      */
     public function refFuncImport(string $mod_name, string $fn_name): self
     {
-        self::ffi()->fn_ref_func_import($this->fn, $mod_name, $fn_name);
+        Encoder::refFuncImport($this->fn, $mod_name, $fn_name);
         return $this;
     }
 
@@ -1084,7 +1136,99 @@ class Func extends Base
      */
     public function refIsNull(RefType $rt): self
     {
-        self::ffi()->fn_ref_is_null($this->fn, $rt->data());
+        Encoder::refIsNull($this->fn);
         return $this;
+    }
+
+    // ==================== 表操作 ====================
+
+    /**
+     * 获取表中的引用
+     *
+     * @param integer $tableidx 表索引
+     * @example ```php
+     * $fn->tableGet(0);
+     * ```
+     * @return self
+     */
+    public function tableGet(int $tableidx): self
+    {
+        Encoder::tableGet($this->fn, $tableidx);
+        return $this;
+    }
+
+    /**
+     * 设置表中的引用
+     *
+     * @param integer $tableidx 表索引
+     * @example ```php
+     * $fn->tableSet(0);
+     * ```
+     * @return self
+     */
+    public function tableSet(int $tableidx): self
+    {
+        Encoder::tableSet($this->fn, $tableidx);
+        return $this;
+    }
+
+    /**
+     * 获取表大小
+     *
+     * @param integer $tableidx 表索引
+     * @example ```php
+     * $fn->tableSize(0);
+     * ```
+     * @return self
+     */
+    public function tableSize(int $tableidx): self
+    {
+        Encoder::tableSize($this->fn, $tableidx);
+        return $this;
+    }
+
+    /**
+     * 增长表
+     *
+     * @param integer $tableidx 表索引
+     * @example ```php
+     * $fn->tableGrow(0);
+     * ```
+     * @return self
+     */
+    public function tableGrow(int $tableidx): self
+    {
+        Encoder::tableGrow($this->fn, $tableidx);
+        return $this;
+    }
+
+    /**
+     * 填充表
+     *
+     * @param integer $tableidx 表索引
+     * @example ```php
+     * $fn->tableFill(0);
+     * ```
+     * @return self
+     */
+    public function tableFill(int $tableidx): self
+    {
+        Encoder::tableFill($this->fn, $tableidx);
+        return $this;
+    }
+
+    /**
+     * 把值类型数组转换为规范字节数组
+     *
+     * @param array<ValType> $types
+     * @return array<int,int>
+     */
+    private function typeBytes(array $types): array
+    {
+        $out = [];
+        foreach ($types as $type) {
+            $out[] = $type->data();
+        }
+        return $out;
     }
 }

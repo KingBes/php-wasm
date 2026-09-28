@@ -23,7 +23,7 @@ public function __construct(int|float|ValType|RefType $val)
 
 | 属性 | 类型 | 说明 |
 |---|---|---|
-| `$data` | `CData` | 底层 C 数据指针 |
+| `$data` | `ConstExprState` | 表达式内部状态（供 `Module` 使用，通常无需直接操作） |
 
 ## 使用示例
 
@@ -81,24 +81,57 @@ $idx3 = $mod->newGlobal("pi_approx", true, ValType::F64, true, new ConstExpressi
 
 ## 与 Module::assignGlobalInit 配合使用
 
-用于为导入的全局变量设置初始化表达式：
+用于重设本地全局变量的初始化表达式（`$index` 为 `Module::newGlobal()` 返回的索引）：
 
 ```php
-$mod->assignGlobalInit(0, new ConstExpression(256));
+$idx = $mod->newGlobal("max_size", true, ValType::I32, false, new ConstExpression(0));
+$mod->assignGlobalInit($idx, new ConstExpression(256));
 ```
 
-## 底层 C 函数映射
+## 静态工厂方法
 
-| PHP 参数类型 | 调用的 C 函数 |
-|---|---|
-| `int` | `constexpr_value_i32(val)` |
-| `float` | `constexpr_value_f32(val)` |
-| `ValType` | `constexpr_value_zero(vty)` |
-| `RefType` | `constexpr_ref_null(rt)` |
+除构造函数外，还提供以下静态工厂方法构造特定类型的常量表达式：
 
-此外，C 层还提供了以下函数（可按需扩展封装）：
+| 方法 | 签名 | 生成的 Wasm 指令 |
+|---|---|---|
+| `i64` | `(int $val): self` | `i64.const` |
+| `f64` | `(float $val): self` | `f64.const` |
+| `globalGet` | `(int $index): self` | `global.get`（引用导入的全局变量） |
+| `refFunc` | `(string $name): self` | `ref.func` |
+| `refFuncImport` | `(string $mod_name, string $fn_name): self` | `ref.func`（引用导入函数） |
 
-| C 函数 | 说明 |
-|---|---|
-| `constexpr_value_i64(val)` | i64 常量表达式 |
-| `constexpr_value_f64(val)` | f64 常量表达式 |
+```php
+use Kingbes\Wasm\ConstExpression;
+
+$e1 = ConstExpression::i64(100);                 // i64.const 100
+$e2 = ConstExpression::f64(1.5);                 // f64.const 1.5
+$e3 = ConstExpression::globalGet(0);             // global.get 0
+$e4 = ConstExpression::refFunc("add");           // ref.func add
+$e5 = ConstExpression::refFuncImport("env", "log");
+```
+
+## 表达式运算
+
+可在已有表达式上追加常量与整数运算，构成复合常量表达式：
+
+| 方法 | 签名 | 说明 |
+|---|---|---|
+| `i32Const` | `(int $val): self` | 追加 `i32.const` |
+| `i64Const` | `(int $val): self` | 追加 `i64.const` |
+| `f32Const` | `(float $val): self` | 追加 `f32.const` |
+| `f64Const` | `(float $val): self` | 追加 `f64.const` |
+| `add` | `(NumType $typ): self` | 加法（仅 `i32` / `i64`） |
+| `sub` | `(NumType $typ): self` | 减法（仅 `i32` / `i64`） |
+| `mul` | `(NumType $typ): self` | 乘法（仅 `i32` / `i64`） |
+
+```php
+use Kingbes\Wasm\ConstExpression;
+use Kingbes\Wasm\NumType;
+
+// (2 + 3) * 4
+$expr = (new ConstExpression(2))
+    ->i32Const(3)->add(NumType::I32)
+    ->i32Const(4)->mul(NumType::I32);
+```
+
+> **说明**：`add` / `sub` / `mul` 传入 `F32` / `F64` 会抛出 `InvalidArgumentException`，因为 Wasm 常量表达式不允许浮点运算；`f32Const` / `f64Const` 仅用于追加浮点常量，不能参与算术。

@@ -14,8 +14,7 @@
         }
     ],
     "require": {
-        "php": ">=8.2",
-        "ext-ffi": "*"
+        "php": ">=8.2"
     },
     "autoload": {
         "psr-4": {
